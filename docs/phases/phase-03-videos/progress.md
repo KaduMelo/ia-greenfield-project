@@ -1,6 +1,6 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
+**Status:** completed
 **SIs:** 11/11 completed
 
 ### SI-03.1 — Infra: MinIO, Redis e configuração de storage/fila
@@ -102,3 +102,31 @@
   - **Follow-up fora de escopo (pré-existente desde a Fase 02):** no `openapi.json` exportado, os schemas dos DTOs de **request** saem sem propriedades (`RegisterDto`, `LoginDto`, `ResetPasswordDto` já estavam assim; agora também `CreateVideoDto`/`CompleteUploadDto`). O `openapi:export` roda via `ts-node`, sem o plugin do `@nestjs/swagger` que a rule `nestjs-dtos.md` pressupõe. Corrigir o pipeline de export (ex.: gerar o metadata do plugin) é tarefa separada.
   - `CLAUDE.md` raiz: fila deixa de ser "TBD" (BullMQ + Redis), nova seção "Videos (Phase 03)"; corrigidas duas afirmações já desatualizadas — módulo `comments` inexistente e `next-frontend/` "not yet initialized" (existe desde a Fase 02).
   - `nestjs-project/CLAUDE.md`: novos serviços com checks de prontidão, `video-worker` como parte do ambiente, rebuild das imagens, scripts, `dist-worker/`, e seção "Videos module" (endpoints, componentes, status, isolamento de testes). Todos os caminhos citados nos dois arquivos foram conferidos no disco.
+
+## Final verification
+
+Rodada após o SI-03.11 (Deliverables do plano), dentro do container `nestjs-api`:
+
+| Check | Resultado |
+|-------|-----------|
+| `npm test -- --runInBand` | PASS — 39 suítes, 234 testes |
+| `npm run test:e2e` | PASS — 7 suítes, 73 testes |
+| `npx tsc --noEmit` | PASS — exit 0 |
+| `npm run lint` | PASS — 0 erros, 1 warning (`no-unsafe-argument`, pré-existente em `src/auth/auth.service.integration-spec.ts`) |
+| `npm run build` | PASS |
+
+Correções feitas durante a verificação final (fix-loop, 1 tentativa):
+
+- **E2E em paralelo:** `test:e2e` não tinha `--runInBand` (o `nestjs-project/CLAUDE.md` já afirmava que tinha). Com 5 suítes E2E batendo no mesmo banco, o paralelismo gerava violações de FK/500. Script corrigido para `jest --config ./test/jest-e2e.json --runInBand`.
+- **Lint dos arquivos da fase:** corpos do supertest tipados com os DTOs reais via `bodyOf<T>()` (`test/support/e2e-app.ts`), schema Joi tipado (`Joi.object<Record<string, unknown>>`), mocks sem `async` ocioso. O `lint --fix` havia removido um `as any` em `e2e-app.ts` e quebrado o `tsc` (acesso a `mailService` privado) — trocado por `app.get(MailService)`.
+- **Dívida de lint pré-existente (Fase 02):** 142 erros em 9 arquivos de teste não tocados pela fase faziam `npm run lint` falhar desde antes da Fase 03. Por decisão do usuário, corrigidos em commit separado (`chore(lint)`), só tipagem, com a suíte inteira reexecutada depois.
+
+## Follow-ups (fora do escopo da fase)
+
+- **Endpoint público de storage para o navegador** (SI-03.2): URLs pré-assinadas usam o host `minio:9000`; o frontend (Fases 04–05) vai precisar de um endpoint público só para assinar.
+- **Imagem do MinIO** (SI-03.1): `bitnamilegacy/minio` não recebe atualizações — revisar antes de produção; em S3 real configurar `PutBucketCors` com `ExposeHeaders: ETag`.
+- **`openapi.json` sem propriedades nos DTOs de request** (SI-03.11, pré-existente desde a Fase 02): o `openapi:export` via `ts-node` não roda o plugin do `@nestjs/swagger`.
+- **Aviso de deprecação do `pg`** (`client.query()` concorrente, removido no `pg@9`) emitido pelo TypeORM nas suítes de integração.
+- **Coletor de rascunhos abandonados** (phase-03-videos/TD-04): uploads iniciados e nunca concluídos ficam em `uploading`; adiado por decisão da TD.
+- **Fixação de libs no `/plan-resolve`:** incluir verificação de formato de módulo (ESM vs CJS) e de peers opcionais — as duas falhas do SI-03.5 vieram daí.
+
