@@ -13,6 +13,12 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **MinIO (object storage):** `curl -f http://localhost:9000/minio/health/live` — expect HTTP 200
+- **Bucket bootstrap:** `docker compose ps -a minio-init` — expect `exited (0)` (one-shot that creates the buckets)
+- **Redis (queue):** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **Video worker:** `docker compose logs video-worker` — expect `Video worker started`
+
+The `video-worker` container starts with `docker compose up -d` and runs its own watch build (`start:worker:dev`); it is part of the environment, unlike the API dev server.
 
 Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
 
@@ -32,8 +38,15 @@ docker compose exec nestjs-api npm run start:dev
 ```
 
 Services:
-- `nestjs-api` — NestJS API, port `3000`
+- `nestjs-api` — NestJS API, port `3000` (image `Dockerfile.dev`, includes `ffmpeg` so the test suites run the real media pipeline)
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP `1025`, web UI `8025`
+- `minio` — S3-compatible object storage, API `9000`, console `9001`, root user `streamtube` / `streamtube-secret` (image `bitnamilegacy/minio`: the official `minio/minio` images are no longer published)
+- `minio-init` — one-shot that creates the buckets `streamtube-videos`, `streamtube-thumbnails`, `streamtube-videos-test`, `streamtube-thumbnails-test`
+- `redis` — Redis 7 for the BullMQ queue, port `6379`
+- `video-worker` — video processing worker (image `Dockerfile.worker`, Node + `ffmpeg`), same source tree as the API, no HTTP port
+
+After changing `Dockerfile.dev` or `Dockerfile.worker`, rebuild: `docker compose build nestjs-api video-worker && docker compose up -d`.
 
 All verification and teardown commands run on the **host machine**:
 
@@ -60,8 +73,11 @@ docker compose down
 
 ```bash
 npm run start:dev                        # Dev server with hot-reload
-npm run build                            # Compile to dist/
+npm run build                            # Compile to dist/ (API and worker entrypoints)
 npm run start:prod                       # Run compiled build
+npm run start:worker                     # Run the compiled video worker (dist/worker/main)
+npm run migration:run                    # Apply pending migrations
+npm run openapi:export                   # Regenerate openapi.json
 
 npm test                                 # Unit tests
 npm run test:watch                       # Unit tests in watch mode
@@ -140,6 +156,8 @@ Whenever possible, prefer storing only the bare address in `.env` and composing 
 
 ## Build Assets
 
+The video worker's watch build (`start:worker:dev`, run by the `video-worker` container) uses `tsconfig.worker.json` and emits to `dist-worker/`, so it never clobbers the API's `dist/` (both builds use `deleteOutDir`).
+
 `tsc` (and therefore `nest build`) only emits compiled `.ts` files to `dist/`. Any non-TypeScript runtime asset — Handlebars templates (`.hbs`), JSON fixtures, static config files, etc. — must be declared in `nest-cli.json` under `compilerOptions.assets` (with `watchAssets: true` for dev). Without that, the file exists in `src/` but is missing in `dist/` and runtime fails only after build.
 
 ## Architecture
@@ -155,6 +173,34 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 - **Decorators:** `emitDecoratorMetadata` + `experimentalDecorators` enabled — required for NestJS DI
 - **Prettier:** single quotes, trailing commas everywhere
 - **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings
+
+## Videos module
+
+Phase 03 (plan: `docs/phases/phase-03-videos/phase-03-videos.md`). Every route requires the JWT (no `@Public()`); errors use the shared `{ statusCode, error, message }` envelope.
+
+| Endpoint | Purpose | Main errors |
+|----------|---------|-------------|
+| `POST /videos` | Pre-register a draft and start a multipart upload; returns `uploadId`, `partSize` and one presigned `PUT` URL per part (max 10GB, allowed types `video/mp4`, `video/quicktime`, `video/webm`, `video/x-matroska`) | 400, 401 |
+| `POST /videos/:id/upload/complete` | Complete the multipart with `{ parts: [{ partNumber, etag }] }`, verify the real size, move to `processing` and enqueue the job | 404 `VIDEO_NOT_FOUND`, 409 `INVALID_VIDEO_STATE`, 422 `UPLOAD_COMPLETION_FAILED` / `UPLOAD_SIZE_MISMATCH` |
+| `GET /videos/:publicId` | Read a video by its unique 11-char public id (status, metadata, presigned `thumbnailUrl`) | 404 `VIDEO_NOT_FOUND` |
+| `GET /videos/:publicId/stream` | Short-lived presigned GET for playback (storage serves `Range` / 206) | 404, 409 `VIDEO_NOT_READY` |
+| `GET /videos/:publicId/download` | Same, signed with `Content-Disposition: attachment` | 404, 409 `VIDEO_NOT_READY` |
+
+Only the channel owner can access a video in this phase; other users get 404.
+
+Components:
+
+- `src/videos/` — `VideosController`, `VideosService` (upload handshake, ownership, playback URLs), `Video` entity (`videos` table, migration `1792171312702-CreateVideos`), `public-id.util.ts`, DTOs.
+- `src/storage/` — `StorageService` over `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` (multipart, presigning, `HeadObject`, put/delete). Buckets come from `STORAGE_VIDEOS_BUCKET` / `STORAGE_THUMBNAILS_BUCKET`; keys are `{videoId}/source` and `{videoId}/default.jpg`.
+- `src/queue/` — `QueueModule` (`@nestjs/bullmq` 11.x, CommonJS; `bullmq` 6 + `ioredis`), registers the `video-processing` queue under `QUEUE_PREFIX`.
+- `src/media/` — `MediaProbeService`: spawns the system `ffprobe` / `ffmpeg` (metadata + JPEG frame), input may be a presigned URL.
+- `src/videos/processing/` — `VideoProcessingQueue` (producer, `jobId: process-{videoId}`, 3 attempts, exponential backoff), `VideoProcessingService` (`process`, `markFailed`, `reconcileStuck`), `VideoProcessingConsumer` (`@Processor`, jobs `process` and `reconcile`), `ReconcileScheduler`. `VideoProcessingModule` is **not** imported by `AppModule`: the API only produces jobs.
+- `src/worker/` — `main.ts` (`NestFactory.createApplicationContext`) and `WorkerModule` for the `video-worker` container.
+- Shared bootstrap: `src/config/config-module.options.ts` and `src/database/typeorm-options.factory.ts` are used by both `AppModule` and `WorkerModule`.
+
+Status lifecycle: `uploading → processing → ready | error`; `processing_error` holds `UPLOAD_SIZE_MISMATCH`, `NO_VIDEO_STREAM`, `PROBE_FAILED` or `THUMBNAIL_FAILED`. Config keys (`STORAGE_*`, `REDIS_*`, `QUEUE_PREFIX`, `VIDEO_RECONCILE_*`) are validated in `src/config/env.validation.ts`; see `.env.example`.
+
+Testing against the real services: suites use the `*-test` buckets (`useTestStorageBuckets()` in `src/test/storage.ts`) and a test queue prefix (`useTestQueuePrefix()` in `src/test/queue.ts`; E2E uses `streamtube-e2e` via `test/support/e2e-app.ts`), so they never touch the worker's `streamtube` jobs. Media fixtures live in `test/fixtures/` (`sample.mp4`, `audio-only.m4a`). Specs for the controller E2E suites are in `specs/`.
 
 ## REST Conventions
 

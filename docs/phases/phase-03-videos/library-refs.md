@@ -13,9 +13,13 @@ libs:
     context7_id: "/taskforcesh/bullmq"
     fetched_at: "2026-10-15T04:10:34-03:00"
   "@nestjs/bullmq":
-    version: "^12.0.0"
+    version: "^11.0.5"
     context7_id: "/nestjs/docs.nestjs.com"
     fetched_at: "2026-10-15T04:10:34-03:00"
+  ioredis:
+    version: "^5.11.1"
+    context7_id: "n/a — peer opcional do bullmq 6 (ver correção abaixo)"
+    fetched_at: "2026-10-16T00:00:00-03:00"
 sources_mtime:
   docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-15T04:09:05-03:00"
   docs/decisions/technical-decisions-video-processing-job-delivery.md: "2026-10-15T04:09:05-03:00"
@@ -25,9 +29,11 @@ sources_mtime:
 
 Documentação condensada das bibliotecas decididas nesta fase, obtida via Context7 e conferida contra o registro do npm em 2026-10-15. Refazer a busca quando a TD de origem mudar (o `/plan-resolve` atualiza este arquivo quando o conjunto de libs no `## Decisions Index` diverge do conjunto em cache aqui).
 
-**Versões confirmadas no npm (2026-10-15):** `@aws-sdk/client-s3` 3.1152.0, `@aws-sdk/s3-request-presigner` 3.1152.0, `bullmq` 6.3.15, `@nestjs/bullmq` 12.0.0.
+**Versões confirmadas no npm (2026-10-15):** `@aws-sdk/client-s3` 3.1152.0, `@aws-sdk/s3-request-presigner` 3.1152.0, `bullmq` 6.3.15, `@nestjs/bullmq` 11.0.5 (ver correção abaixo).
 
-> **Divergência sinalizada e resolvida.** O documento de decisões registrou "`bullmq` `^5`" e "`@nestjs/bullmq` 11.0.4" (pesquisa de 2026-08-03). Hoje a linha corrente é BullMQ **v6** e `@nestjs/bullmq` **12.0.0**, cujos peers são `bullmq: ^3 || ^4 || ^5 || ^6` e `@nestjs/core`/`@nestjs/common: ^10 || ^11 || ^12`. O par fixado acima é compatível com o NestJS 11 instalado em `nestjs-project/`. Qualquer mudança de comportamento entre BullMQ v5 e v6 que afete as APIs citadas abaixo deve ser checada via Context7 durante o `/implement`.
+> **Correção 2026-10-16 (SI-03.5):** `@nestjs/bullmq` 12.x (e `@nestjs/bull-shared` 12.x) é publicado **somente como ES Module** (`"type": "module"`); o backend compila para CommonJS e o Jest (ts-jest) não transforma `node_modules`, então as suítes falhavam ao carregar (`SyntaxError: Unexpected token 'export'`). Fixado `@nestjs/bullmq@^11.0.5`, a última linha CommonJS, cujos peers já aceitam `bullmq ^6.0.0` e `@nestjs/core ^11`. O `bullmq` 6 continua (expõe build CJS em `dist/cjs`). No BullMQ 6 o cliente Redis virou **peer opcional** (`ioredis >=5`, `redis >=5` ou `pg`); sem um deles instalado a fila não conecta (`BullMQ could not load the optional 'ioredis' package`). Adicionado `ioredis@^5.11.1` (CommonJS, linha madura que o BullMQ 5 embutia).
+
+> **Divergência sinalizada e resolvida.** O documento de decisões registrou "`bullmq` `^5`" e "`@nestjs/bullmq` 11.0.4" (pesquisa de 2026-08-03). Hoje a linha corrente é BullMQ **v6** e `@nestjs/bullmq` **12.0.0**, cujos peers são `bullmq: ^3 || ^4 || ^5 || ^6` e `@nestjs/core`/`@nestjs/common: ^10 || ^11 || ^12`. _(Superado pela correção de 2026-10-16 acima: a 12.x é ESM-only e foi trocada pela 11.0.5.)_ Qualquer mudança de comportamento entre BullMQ v5 e v6 que afete as APIs citadas abaixo deve ser checada via Context7 durante o `/implement`.
 
 ### @aws-sdk/client-s3
 
@@ -116,7 +122,7 @@ await queue.upsertJobScheduler(
 
 ### @nestjs/bullmq
 
-**Source:** `/nestjs/docs.nestjs.com` (Context7, `content/application/queues.md`), reputação alta. Origem: `phase-03-videos/TD-06` Decision A. Peers da 12.0.0: `bullmq ^3–^6`, `@nestjs/core`/`@nestjs/common` `^10 || ^11 || ^12`.
+**Source:** `/nestjs/docs.nestjs.com` (Context7, `content/application/queues.md`), reputação alta. Origem: `phase-03-videos/TD-06` Decision A. Versão fixada 11.0.5 (CommonJS); peers: `bullmq ^3–^6`, `@nestjs/core`/`@nestjs/common` `^10 || ^11`. A API usada (`forRootAsync`, `registerQueue`, `@InjectQueue`, `@Processor` + `WorkerHost`) é a mesma da 12.x.
 
 #### Registro do módulo
 

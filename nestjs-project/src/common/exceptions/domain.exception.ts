@@ -39,6 +39,48 @@ export class TokenExpiredException extends DomainException {
   }
 }
 
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class InvalidVideoStateException extends DomainException {
+  constructor() {
+    super(
+      'INVALID_VIDEO_STATE',
+      409,
+      'Video is not in a state that allows this operation',
+    );
+  }
+}
+
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_READY', 409, 'Video processing has not finished');
+  }
+}
+
+export class UploadCompletionFailedException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_COMPLETION_FAILED',
+      422,
+      'Storage rejected the upload completion (missing or invalid parts)',
+    );
+  }
+}
+
+export class UploadSizeMismatchException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_SIZE_MISMATCH',
+      422,
+      'Uploaded size does not match the declared file size',
+    );
+  }
+}
+
 export class TokenReuseDetectedException extends DomainException {
   constructor() {
     super(

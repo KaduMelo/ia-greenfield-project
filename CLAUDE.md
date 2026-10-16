@@ -10,9 +10,9 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 This is a monorepo with two main areas:
 
-- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
+- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express) and the video worker (same codebase, separate container). Modules: `auth`, `users`, `channels`, `mail`, `videos`, `storage`, `queue`, `media`, `worker`. See `nestjs-project/CLAUDE.md`.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` (Next.js) — frontend (Phases 01–02 screens); has its own `next-frontend/CLAUDE.md`. The video UI is not part of Phase 03.
 
 ## Architecture (C4 Container Diagram)
 
@@ -22,9 +22,22 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 - **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
-- **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Object Storage** (S3/MinIO) → video files and thumbnails — MinIO locally (Compose service `minio`), any S3-compatible store in production
+- **Message Queue** (BullMQ on Redis, Compose service `redis`) → video processing job queue
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+## Videos (Phase 03)
+
+Upload, processing and playback of videos. Decisions: `docs/decisions/technical-decisions-phase-03-videos.md` and `docs/decisions/technical-decisions-video-processing-job-delivery.md`; plan and progress: `docs/phases/phase-03-videos/`.
+
+- **Upload (up to 10GB) never passes through the API.** `POST /videos` pre-registers the video as a draft and starts an S3 multipart upload; the client PUTs each part directly to storage using presigned URLs, then calls `POST /videos/:id/upload/complete`, which verifies the real size and enqueues processing.
+- **Processing** runs in the `video-worker` container: it consumes the `video-processing` queue, runs `ffprobe`/`ffmpeg` (duration, metadata, JPEG thumbnail) reading the source through a presigned URL, and moves the video to `ready` or `error`. A periodic `reconcile` job re-enqueues videos stuck in `processing`.
+- **Unique URL:** each video has an 11-character base62 `public_id`; `GET /videos/:publicId` resolves it.
+- **Streaming and download** return short-lived presigned GET URLs (`/videos/:publicId/stream`, `/videos/:publicId/download`); the storage serves `Range` / `206 Partial Content`.
+- **Status:** `uploading → processing → ready | error` (processing lifecycle), separate from `publication_status` (`draft` in this phase).
+- **Access:** in Phase 03 only the channel owner can read, stream or download a video; public access arrives with publication in Phase 04.
+
+Endpoint, service and command details live in `nestjs-project/CLAUDE.md` → "Videos module".
 
 ## Docker Networking
 

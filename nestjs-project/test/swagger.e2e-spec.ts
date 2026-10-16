@@ -85,6 +85,39 @@ describe('Swagger endpoints (e2e)', () => {
         .expect(200);
       expect(res.headers['content-type']).toMatch(/yaml/);
     });
+
+    it('GET /api/docs-json documents the video endpoints with their error statuses', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/docs-json')
+        .expect(200);
+      const { paths } = res.body as {
+        paths: Record<
+          string,
+          Record<string, { responses: Record<string, unknown> }>
+        >;
+      };
+
+      expect(Object.keys(paths)).toEqual(
+        expect.arrayContaining([
+          '/videos',
+          '/videos/{id}/upload/complete',
+          '/videos/{publicId}',
+          '/videos/{publicId}/stream',
+          '/videos/{publicId}/download',
+        ]),
+      );
+      expect(Object.keys(paths['/videos'].post.responses)).toEqual(
+        expect.arrayContaining(['201', '400', '401']),
+      );
+      expect(
+        Object.keys(paths['/videos/{id}/upload/complete'].post.responses),
+      ).toEqual(
+        expect.arrayContaining(['200', '400', '401', '404', '409', '422']),
+      );
+      expect(
+        Object.keys(paths['/videos/{publicId}/stream'].get.responses),
+      ).toEqual(expect.arrayContaining(['200', '400', '401', '404', '409']));
+    });
   });
 
   describe('when SWAGGER_ENABLED is not set', () => {
