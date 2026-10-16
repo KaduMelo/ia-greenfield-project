@@ -1,6 +1,6 @@
 import * as Joi from 'joi';
 
-export const envValidationSchema = Joi.object({
+export const envValidationSchema = Joi.object<Record<string, unknown>>({
   NODE_ENV: Joi.string()
     .valid('development', 'production', 'test')
     .default('development'),
@@ -21,4 +21,22 @@ export const envValidationSchema = Joi.object({
   MAIL_PORT: Joi.number().default(1025),
   MAIL_FROM: Joi.string().default('"StreamTube" <noreply@streamtube.com>'),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
+  STORAGE_ENDPOINT: Joi.string().uri().default('http://minio:9000'),
+  STORAGE_REGION: Joi.string().default('us-east-1'),
+  STORAGE_ACCESS_KEY: Joi.string().required(),
+  STORAGE_SECRET_KEY: Joi.string().required(),
+  STORAGE_FORCE_PATH_STYLE: Joi.string().valid('true', 'false').default('true'),
+  STORAGE_VIDEOS_BUCKET: Joi.string().default('streamtube-videos'),
+  STORAGE_THUMBNAILS_BUCKET: Joi.string().default('streamtube-thumbnails'),
+  STORAGE_UPLOAD_PART_SIZE_BYTES: Joi.number()
+    .integer()
+    .min(5242880)
+    .default(67108864),
+  STORAGE_UPLOAD_URL_TTL_SECONDS: Joi.number().integer().min(1).default(21600),
+  STORAGE_PLAYBACK_URL_TTL_SECONDS: Joi.number().integer().min(1).default(3600),
+  REDIS_HOST: Joi.string().default('redis'),
+  REDIS_PORT: Joi.number().port().default(6379),
+  QUEUE_PREFIX: Joi.string().default('streamtube'),
+  VIDEO_RECONCILE_INTERVAL_MS: Joi.number().integer().min(1).default(300000),
+  VIDEO_RECONCILE_STUCK_AFTER_MS: Joi.number().integer().min(1).default(900000),
 });
